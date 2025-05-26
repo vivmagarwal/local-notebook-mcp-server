@@ -8,7 +8,7 @@ setup(
     version="1.0.0",
     author="Vivek M. Agarwal",
     author_email="vivmagarwal@gmail.com",
-    description="A simple MCP server for local Jupyter notebook management",
+    description="A production-ready MCP server for local Jupyter notebook management",
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/vivmagarwal/local-notebook-mcp-server",
