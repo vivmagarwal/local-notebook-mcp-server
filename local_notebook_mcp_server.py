@@ -1,21 +1,18 @@
 #!/usr/bin/env python3
 """
-Local Notebook MCP Server
+Local Notebook MCP Server - Production Ready
 
-A comprehensive MCP server for working with local Jupyter notebooks (.ipynb files).
-Works directly with files without requiring a running Jupyter server.
-
-Features:
-- Read/write notebook files
-- Execute code cells with kernel management
-- Add/modify/delete cells
-- Search and analyze notebooks
-- Export to various formats
-- Backup and safety features
+A simple, efficient MCP server for working with local Jupyter notebooks.
+All functionality consolidated into a single file for maximum simplicity.
 """
 
+import os
+import json
+import shutil
 import asyncio
-from typing import Any, Dict, Optional
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 try:
     from mcp.server.fastmcp import FastMCP
@@ -23,608 +20,556 @@ except ImportError:
     print("Error: mcp not installed. Install with: pip install mcp")
     exit(1)
 
-# Import our modules with aliases to avoid name conflicts
-import os
-import sys
-
-# Add current directory to Python path for imports
-current_dir = os.path.dirname(os.path.abspath(__file__))
-if current_dir not in sys.path:
-    sys.path.insert(0, current_dir)
+try:
+    import nbformat
+    from nbformat import v4 as nbf
+except ImportError:
+    print("Error: nbformat not installed. Install with: pip install nbformat")
+    exit(1)
 
 try:
-    from file_operations import (
-        read_notebook_file as _read_notebook_file,
-        list_notebook_files as _list_notebook_files,
-        backup_notebook_file as _backup_notebook_file,
-        create_new_notebook as _create_new_notebook,
-        get_notebook_metadata as _get_notebook_metadata,
-        analyze_notebook_dependencies as _analyze_notebook_dependencies,
-        search_notebook_cells as _search_notebook_cells
-    )
-
-    from cell_operations import (
-        add_notebook_cell as _add_notebook_cell,
-        modify_notebook_cell as _modify_notebook_cell,
-        delete_notebook_cell as _delete_notebook_cell,
-        get_notebook_cell as _get_notebook_cell,
-        move_notebook_cell as _move_notebook_cell,
-        duplicate_notebook_cell as _duplicate_notebook_cell,
-        clear_cell_outputs as _clear_cell_outputs,
-        change_cell_type as _change_cell_type
-    )
-
-    from kernel_manager import (
-        execute_cell_code as _execute_cell_code,
-        execute_all_cells as _execute_all_cells,
-        restart_kernel_manager as _restart_kernel_manager,
-        interrupt_kernel_manager as _interrupt_kernel_manager,
-        list_available_kernels as _list_available_kernels
-    )
-
-    from export_operations import (
-        export_notebook_to_python as _export_notebook_to_python,
-        export_notebook_to_markdown as _export_notebook_to_markdown,
-        export_notebook_to_html as _export_notebook_to_html,
-        export_notebook_to_pdf as _export_notebook_to_pdf,
-        export_notebook_to_slides as _export_notebook_to_slides,
-        export_notebook_code_only as _export_notebook_code_only,
-        get_export_formats as _get_export_formats
-    )
-
-    from workflow_operations import (
-        create_and_execute_cell as _create_and_execute_cell,
-        execute_with_refresh as _execute_with_refresh,
-        batch_create_and_execute as _batch_create_and_execute
-    )
-
-    from notebook_utils import (
-        enhanced_safe_save_notebook as _enhanced_safe_save_notebook,
-        synchronous_auto_save as _synchronous_auto_save
-    )
-except ImportError as e:
-    print(f"Error importing modules: {e}")
-    print("Please ensure all required modules are in the same directory as the main server file.")
-    sys.exit(1)
+    from jupyter_client import KernelManager
+    from jupyter_client.kernelspec import find_kernel_specs
+except ImportError:
+    print("Error: jupyter_client not installed. Install with: pip install jupyter_client")
+    exit(1)
 
 # Initialize MCP server
-mcp = FastMCP("local-notebook")
+mcp = FastMCP("local-notebook-mcp-server")
 
-# File Operations Tools
+# Global kernel manager
+_kernel_manager: Optional[KernelManager] = None
+_current_kernel_spec = "python3"
 
+
+def safe_load_notebook(notebook_path: str) -> nbformat.NotebookNode:
+    """Load a notebook file safely."""
+    with open(notebook_path, 'r', encoding='utf-8') as f:
+        notebook_data = json.load(f)
+    
+    # Clean up problematic fields
+    if 'cells' in notebook_data:
+        for cell in notebook_data['cells']:
+            if 'id' in cell:
+                del cell['id']
+            if 'source' in cell and isinstance(cell['source'], list):
+                cell['source'] = ''.join(cell['source'])
+    
+    return nbformat.from_dict(notebook_data)
+
+
+def safe_save_notebook(notebook: nbformat.NotebookNode, notebook_path: str) -> None:
+    """Save a notebook file safely."""
+    os.makedirs(os.path.dirname(notebook_path), exist_ok=True)
+    
+    # Create backup if file exists
+    if os.path.exists(notebook_path):
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup_path = f"{Path(notebook_path).stem}_backup_{timestamp}.ipynb"
+        shutil.copy2(notebook_path, backup_path)
+    
+    # Convert to dict and save
+    notebook_dict = {
+        'cells': [],
+        'metadata': notebook.metadata,
+        'nbformat': notebook.nbformat,
+        'nbformat_minor': notebook.nbformat_minor
+    }
+    
+    for cell in notebook.cells:
+        cell_dict = {
+            'cell_type': cell.cell_type,
+            'metadata': getattr(cell, 'metadata', {}),
+            'source': str(getattr(cell, 'source', ''))
+        }
+        
+        if cell.cell_type == 'code':
+            cell_dict['outputs'] = getattr(cell, 'outputs', [])
+            cell_dict['execution_count'] = getattr(cell, 'execution_count', None)
+        
+        notebook_dict['cells'].append(cell_dict)
+    
+    with open(notebook_path, 'w', encoding='utf-8') as f:
+        json.dump(notebook_dict, f, indent=2, ensure_ascii=False)
+
+
+def extract_output_text(output: Dict[str, Any]) -> str:
+    """Extract text from cell output."""
+    output_type = output.get("output_type")
+    
+    if output_type == "stream":
+        text = output.get("text", "")
+        return str(text) if not isinstance(text, list) else ''.join(text)
+    elif output_type in ["display_data", "execute_result"]:
+        data = output.get("data", {})
+        if "text/plain" in data:
+            text = data["text/plain"]
+            return str(text) if not isinstance(text, list) else ''.join(text)
+        return f"[{output_type}]"
+    elif output_type == "error":
+        traceback = output.get("traceback", [])
+        return "\n".join(str(line) for line in traceback)
+    return f"[{output_type}]"
+
+
+def ensure_kernel_manager(kernel_spec: str = "python3") -> KernelManager:
+    """Ensure kernel manager is running."""
+    global _kernel_manager, _current_kernel_spec
+    
+    if _kernel_manager is None or _current_kernel_spec != kernel_spec:
+        if _kernel_manager is not None:
+            try:
+                _kernel_manager.shutdown_kernel()
+            except:
+                pass
+        
+        _kernel_manager = KernelManager(kernel_name=kernel_spec)
+        _kernel_manager.start_kernel()
+        _current_kernel_spec = kernel_spec
+    
+    return _kernel_manager
+
+
+# File Operations
 @mcp.tool()
 def read_notebook(notebook_path: str) -> Dict[str, Any]:
-    """Read and parse a local Jupyter notebook file.
-    
-    Args:
-        notebook_path: Path to the .ipynb file
+    """Read and parse a notebook file."""
+    try:
+        notebook = safe_load_notebook(notebook_path)
         
-    Returns:
-        Dict containing notebook content and metadata
-    """
-    return _read_notebook_file(notebook_path)
+        cells_info = []
+        for i, cell in enumerate(notebook.cells):
+            cell_info = {
+                "index": i,
+                "cell_type": cell.cell_type,
+                "source": str(getattr(cell, 'source', '')),
+                "metadata": getattr(cell, 'metadata', {})
+            }
+            
+            if cell.cell_type == "code":
+                cell_info["execution_count"] = getattr(cell, 'execution_count', None)
+                cell_info["outputs"] = [extract_output_text(output) for output in getattr(cell, 'outputs', [])]
+            
+            cells_info.append(cell_info)
+        
+        return {
+            "success": True,
+            "notebook_path": notebook_path,
+            "metadata": notebook.metadata,
+            "cells_count": len(notebook.cells),
+            "cells": cells_info
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
 
 @mcp.tool()
 def list_notebooks(directory: str = ".") -> Dict[str, Any]:
-    """List all Jupyter notebook files in a directory.
-    
-    Args:
-        directory: Directory to search (default: current directory)
+    """List all notebook files in a directory."""
+    try:
+        path_obj = Path(directory)
+        if not path_obj.exists():
+            return {"success": False, "error": f"Directory {directory} does not exist"}
         
-    Returns:
-        Dict containing list of notebook files
-    """
-    return _list_notebook_files(directory)
-
-
-@mcp.tool()
-def backup_notebook(notebook_path: str) -> Dict[str, Any]:
-    """Create a backup of a notebook file.
-    
-    Args:
-        notebook_path: Path to the .ipynb file to backup
+        notebooks = []
+        for notebook_path in path_obj.glob("*.ipynb"):
+            try:
+                info = {
+                    "path": str(notebook_path),
+                    "name": notebook_path.name,
+                    "size": notebook_path.stat().st_size,
+                    "modified": datetime.fromtimestamp(notebook_path.stat().st_mtime).isoformat()
+                }
+                notebooks.append(info)
+            except:
+                continue
         
-    Returns:
-        Dict containing backup information
-    """
-    return _backup_notebook_file(notebook_path)
+        return {
+            "success": True,
+            "directory": directory,
+            "notebooks": sorted(notebooks, key=lambda x: x["name"])
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
 
 @mcp.tool()
 def create_notebook(notebook_path: str, title: str = "New Notebook") -> Dict[str, Any]:
-    """Create a new empty Jupyter notebook.
-    
-    Args:
-        notebook_path: Path for the new .ipynb file
-        title: Title for the new notebook
+    """Create a new notebook."""
+    try:
+        notebook = nbf.new_notebook()
+        notebook.metadata = {
+            "kernelspec": {
+                "display_name": "Python 3",
+                "language": "python",
+                "name": "python3"
+            },
+            "language_info": {
+                "codemirror_mode": {"name": "ipython", "version": 3},
+                "file_extension": ".py",
+                "mimetype": "text/x-python",
+                "name": "python",
+                "nbconvert_exporter": "python",
+                "pygments_lexer": "ipython3",
+                "version": "3.8.5"
+            },
+            "title": title
+        }
         
-    Returns:
-        Dict containing operation result
-    """
-    return _create_new_notebook(notebook_path, title)
-
-
-@mcp.tool()
-def get_notebook_metadata(notebook_path: str) -> Dict[str, Any]:
-    """Get comprehensive metadata and statistics about a notebook.
-    
-    Args:
-        notebook_path: Path to the .ipynb file
+        # Add title cell
+        notebook.cells.append(nbf.new_markdown_cell(f"# {title}"))
+        # Add code cell
+        notebook.cells.append(nbf.new_code_cell("# Your code here"))
         
-    Returns:
-        Dict containing notebook metadata and statistics
-    """
-    return _get_notebook_metadata(notebook_path)
-
-
-@mcp.tool()
-def analyze_dependencies(notebook_path: str) -> Dict[str, Any]:
-    """Analyze imported packages and dependencies in a notebook.
-    
-    Args:
-        notebook_path: Path to the .ipynb file
+        safe_save_notebook(notebook, notebook_path)
         
-    Returns:
-        Dict containing dependency analysis
-    """
-    return _analyze_notebook_dependencies(notebook_path)
+        return {
+            "success": True,
+            "notebook_path": notebook_path,
+            "title": title,
+            "cells_count": len(notebook.cells)
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
 
-@mcp.tool()
-def search_cells(notebook_path: str, search_term: str, case_sensitive: bool = False) -> Dict[str, Any]:
-    """Search for content across all cells in a notebook.
-    
-    Args:
-        notebook_path: Path to the .ipynb file
-        search_term: Text to search for
-        case_sensitive: Whether search should be case sensitive
-        
-    Returns:
-        Dict containing search results
-    """
-    return _search_notebook_cells(notebook_path, search_term, case_sensitive)
-
-
-# Cell Management Tools
-
+# Cell Operations
 @mcp.tool()
 def add_cell(notebook_path: str, cell_type: str, content: str, index: Optional[int] = None) -> Dict[str, Any]:
-    """Add a new cell to a notebook.
-    
-    Args:
-        notebook_path: Path to the .ipynb file
-        cell_type: Type of cell ('code', 'markdown', 'raw')
-        content: Content of the new cell
-        index: Position to insert cell (default: append to end)
+    """Add a new cell to a notebook."""
+    try:
+        notebook = safe_load_notebook(notebook_path)
         
-    Returns:
-        Dict containing operation result
-    """
-    return _add_notebook_cell(notebook_path, cell_type, content, index)
+        if cell_type == "code":
+            new_cell = nbf.new_code_cell(content)
+        elif cell_type == "markdown":
+            new_cell = nbf.new_markdown_cell(content)
+        elif cell_type == "raw":
+            new_cell = nbf.new_raw_cell(content)
+        else:
+            return {"success": False, "error": f"Invalid cell type: {cell_type}"}
+        
+        if index is None:
+            notebook.cells.append(new_cell)
+            index = len(notebook.cells) - 1
+        else:
+            notebook.cells.insert(index, new_cell)
+        
+        safe_save_notebook(notebook, notebook_path)
+        
+        return {
+            "success": True,
+            "notebook_path": notebook_path,
+            "cell_type": cell_type,
+            "index": index,
+            "total_cells": len(notebook.cells)
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
 
 @mcp.tool()
 def modify_cell(notebook_path: str, index: int, content: str) -> Dict[str, Any]:
-    """Modify the content of an existing cell.
-    
-    Args:
-        notebook_path: Path to the .ipynb file
-        index: Index of the cell to modify
-        content: New content for the cell
+    """Modify an existing cell."""
+    try:
+        notebook = safe_load_notebook(notebook_path)
         
-    Returns:
-        Dict containing operation result
-    """
-    return _modify_notebook_cell(notebook_path, index, content)
+        if index < 0 or index >= len(notebook.cells):
+            return {"success": False, "error": f"Cell index {index} out of range"}
+        
+        notebook.cells[index].source = content
+        
+        if notebook.cells[index].cell_type == "code":
+            notebook.cells[index].outputs = []
+            notebook.cells[index].execution_count = None
+        
+        safe_save_notebook(notebook, notebook_path)
+        
+        return {
+            "success": True,
+            "notebook_path": notebook_path,
+            "index": index,
+            "cell_type": notebook.cells[index].cell_type
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
 
 @mcp.tool()
 def delete_cell(notebook_path: str, index: int) -> Dict[str, Any]:
-    """Delete a cell from a notebook.
-    
-    Args:
-        notebook_path: Path to the .ipynb file
-        index: Index of the cell to delete
+    """Delete a cell from a notebook."""
+    try:
+        notebook = safe_load_notebook(notebook_path)
         
-    Returns:
-        Dict containing operation result
-    """
-    return _delete_notebook_cell(notebook_path, index)
+        if index < 0 or index >= len(notebook.cells):
+            return {"success": False, "error": f"Cell index {index} out of range"}
+        
+        deleted_cell = notebook.cells.pop(index)
+        safe_save_notebook(notebook, notebook_path)
+        
+        return {
+            "success": True,
+            "notebook_path": notebook_path,
+            "deleted_index": index,
+            "remaining_cells": len(notebook.cells)
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
 
 @mcp.tool()
 def get_cell(notebook_path: str, index: int) -> Dict[str, Any]:
-    """Get the content of a specific cell.
-    
-    Args:
-        notebook_path: Path to the .ipynb file
-        index: Index of the cell to retrieve
+    """Get content of a specific cell."""
+    try:
+        notebook = safe_load_notebook(notebook_path)
         
-    Returns:
-        Dict containing cell information
-    """
-    return _get_notebook_cell(notebook_path, index)
-
-
-@mcp.tool()
-def move_cell(notebook_path: str, from_index: int, to_index: int) -> Dict[str, Any]:
-    """Move a cell to a different position in the notebook.
-    
-    Args:
-        notebook_path: Path to the .ipynb file
-        from_index: Current index of the cell
-        to_index: Target index for the cell
+        if index < 0 or index >= len(notebook.cells):
+            return {"success": False, "error": f"Cell index {index} out of range"}
         
-    Returns:
-        Dict containing operation result
-    """
-    return _move_notebook_cell(notebook_path, from_index, to_index)
-
-
-@mcp.tool()
-def duplicate_cell(notebook_path: str, index: int) -> Dict[str, Any]:
-    """Duplicate a cell in the notebook.
-    
-    Args:
-        notebook_path: Path to the .ipynb file
-        index: Index of the cell to duplicate
+        cell = notebook.cells[index]
+        result = {
+            "success": True,
+            "index": index,
+            "cell_type": cell.cell_type,
+            "source": str(getattr(cell, 'source', '')),
+            "metadata": getattr(cell, 'metadata', {})
+        }
         
-    Returns:
-        Dict containing operation result
-    """
-    return _duplicate_notebook_cell(notebook_path, index)
-
-
-@mcp.tool()
-def clear_outputs(notebook_path: str, index: Optional[int] = None) -> Dict[str, Any]:
-    """Clear outputs from a specific cell or all code cells.
-    
-    Args:
-        notebook_path: Path to the .ipynb file
-        index: Index of specific cell to clear (default: clear all)
+        if cell.cell_type == "code":
+            result["execution_count"] = getattr(cell, 'execution_count', None)
+            result["outputs"] = [extract_output_text(output) for output in getattr(cell, 'outputs', [])]
         
-    Returns:
-        Dict containing operation result
-    """
-    return _clear_cell_outputs(notebook_path, index)
+        return result
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
 
-@mcp.tool()
-def change_cell_type(notebook_path: str, index: int, new_type: str) -> Dict[str, Any]:
-    """Change the type of an existing cell.
-    
-    Args:
-        notebook_path: Path to the .ipynb file
-        index: Index of the cell to change
-        new_type: New cell type ('code', 'markdown', 'raw')
-        
-    Returns:
-        Dict containing operation result
-    """
-    return _change_cell_type(notebook_path, index, new_type)
-
-
-# Code Execution Tools
-
+# Code Execution
 @mcp.tool()
 async def execute_cell(notebook_path: str, index: int, kernel_spec: str = "python3", timeout: int = 30) -> Dict[str, Any]:
-    """Execute a specific code cell and return the outputs.
-    
-    Args:
-        notebook_path: Path to the .ipynb file
-        index: Index of the cell to execute
-        kernel_spec: Kernel specification to use
-        timeout: Execution timeout in seconds
+    """Execute a code cell."""
+    try:
+        notebook = safe_load_notebook(notebook_path)
         
-    Returns:
-        Dict containing execution results
-    """
-    return await _execute_cell_code(notebook_path, index, kernel_spec, timeout)
+        if index < 0 or index >= len(notebook.cells):
+            return {"success": False, "error": f"Cell index {index} out of range"}
+        
+        cell = notebook.cells[index]
+        if cell.cell_type != "code":
+            return {"success": False, "error": f"Cell {index} is not a code cell"}
+        
+        km = ensure_kernel_manager(kernel_spec)
+        kc = km.client()
+        
+        # Clear outputs
+        cell.outputs = []
+        
+        # Execute
+        msg_id = kc.execute(cell.source)
+        
+        outputs = []
+        execution_count = None
+        
+        import time
+        start_time = time.time()
+        
+        while time.time() - start_time < timeout:
+            try:
+                msg = kc.get_iopub_msg(timeout=0.5)
+                msg_type = msg['msg_type']
+                content = msg['content']
+                
+                if msg_type == 'execute_input':
+                    execution_count = content['execution_count']
+                elif msg_type == 'stream':
+                    output = {
+                        'output_type': 'stream',
+                        'name': content.get('name', 'stdout'),
+                        'text': content.get('text', '')
+                    }
+                    outputs.append(output)
+                    cell.outputs.append(output)
+                elif msg_type in ['display_data', 'execute_result']:
+                    output = {
+                        'output_type': msg_type,
+                        'data': content.get('data', {}),
+                        'metadata': content.get('metadata', {})
+                    }
+                    if msg_type == 'execute_result':
+                        output['execution_count'] = content.get('execution_count')
+                    outputs.append(output)
+                    cell.outputs.append(output)
+                elif msg_type == 'error':
+                    error_output = {
+                        'output_type': 'error',
+                        'ename': content['ename'],
+                        'evalue': content['evalue'],
+                        'traceback': content['traceback']
+                    }
+                    outputs.append(error_output)
+                    cell.outputs.append(error_output)
+                elif msg_type == 'status' and content['execution_state'] == 'idle':
+                    break
+                        
+            except:
+                await asyncio.sleep(0.1)
+                continue
+        
+        if execution_count is not None:
+            cell.execution_count = execution_count
+        
+        safe_save_notebook(notebook, notebook_path)
+        
+        return {
+            "success": True,
+            "notebook_path": notebook_path,
+            "index": index,
+            "execution_count": execution_count,
+            "outputs": [extract_output_text(output) for output in outputs]
+        }
+                    
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
 
 @mcp.tool()
 async def execute_notebook(notebook_path: str, kernel_spec: str = "python3", timeout: int = 300) -> Dict[str, Any]:
-    """Execute all code cells in a notebook.
-    
-    Args:
-        notebook_path: Path to the .ipynb file
-        kernel_spec: Kernel specification to use
-        timeout: Total execution timeout in seconds
+    """Execute all code cells in a notebook."""
+    try:
+        notebook = safe_load_notebook(notebook_path)
         
-    Returns:
-        Dict containing execution results
-    """
-    return await _execute_all_cells(notebook_path, kernel_spec, timeout)
+        # Restart kernel for clean execution
+        global _kernel_manager
+        if _kernel_manager is not None:
+            try:
+                _kernel_manager.shutdown_kernel()
+            except:
+                pass
+            _kernel_manager = None
+        
+        results = []
+        code_cells = [i for i, cell in enumerate(notebook.cells) if cell.cell_type == "code"]
+        
+        for i in code_cells:
+            result = await execute_cell(notebook_path, i, kernel_spec, timeout // len(code_cells) if code_cells else 30)
+            results.append({
+                "index": i,
+                "success": result["success"],
+                "outputs": result.get("outputs", []),
+                "error": result.get("error")
+            })
+            
+            if not result["success"]:
+                break
+        
+        return {
+            "success": True,
+            "notebook_path": notebook_path,
+            "total_code_cells": len(code_cells),
+            "executed_cells": len(results),
+            "results": results
+        }
+        
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+# Utility Functions
+@mcp.tool()
+def search_cells(notebook_path: str, search_term: str, case_sensitive: bool = False) -> Dict[str, Any]:
+    """Search for content across cells."""
+    try:
+        notebook = safe_load_notebook(notebook_path)
+        
+        matches = []
+        search_text = search_term if case_sensitive else search_term.lower()
+        
+        for i, cell in enumerate(notebook.cells):
+            cell_content = str(getattr(cell, 'source', ''))
+            check_content = cell_content if case_sensitive else cell_content.lower()
+            
+            if search_text in check_content:
+                lines = cell_content.split('\n')
+                matching_lines = []
+                
+                for line_num, line in enumerate(lines):
+                    check_line = line if case_sensitive else line.lower()
+                    if search_text in check_line:
+                        matching_lines.append({
+                            "line_number": line_num + 1,
+                            "content": line.strip()
+                        })
+                
+                matches.append({
+                    "cell_index": i,
+                    "cell_type": cell.cell_type,
+                    "matching_lines": matching_lines
+                })
+        
+        return {
+            "success": True,
+            "notebook_path": notebook_path,
+            "search_term": search_term,
+            "matches_found": len(matches),
+            "matches": matches
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
 
 @mcp.tool()
-async def restart_kernel(kernel_spec: str = "python3") -> Dict[str, Any]:
-    """Restart the Jupyter kernel.
-    
-    Args:
-        kernel_spec: Kernel specification to use
+def export_to_python(notebook_path: str, output_path: Optional[str] = None) -> Dict[str, Any]:
+    """Export notebook to Python script."""
+    try:
+        notebook = safe_load_notebook(notebook_path)
         
-    Returns:
-        Dict containing restart result
-    """
-    return await _restart_kernel_manager(kernel_spec)
-
-
-@mcp.tool()
-async def interrupt_kernel() -> Dict[str, Any]:
-    """Interrupt the currently running kernel.
-    
-    Returns:
-        Dict containing interrupt result
-    """
-    return await _interrupt_kernel_manager()
+        if output_path is None:
+            output_path = notebook_path.replace('.ipynb', '.py')
+        
+        python_code = []
+        
+        for i, cell in enumerate(notebook.cells):
+            if cell.cell_type == "code":
+                python_code.append(f"# Cell {i + 1}")
+                python_code.append(str(getattr(cell, 'source', '')))
+                python_code.append("")
+            elif cell.cell_type == "markdown":
+                python_code.append(f"# Markdown Cell {i + 1}")
+                for line in str(getattr(cell, 'source', '')).split('\n'):
+                    python_code.append(f"# {line}")
+                python_code.append("")
+        
+        with open(output_path, 'w', encoding='utf-8') as f:
+            f.write('\n'.join(python_code))
+        
+        return {
+            "success": True,
+            "notebook_path": notebook_path,
+            "output_path": output_path,
+            "total_cells_exported": len(notebook.cells)
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
 
 @mcp.tool()
 def list_kernels() -> Dict[str, Any]:
-    """List available kernel specifications.
-    
-    Returns:
-        Dict containing available kernels
-    """
-    return _list_available_kernels()
-
-
-# Export Tools
-
-@mcp.tool()
-def export_to_python(notebook_path: str, output_path: Optional[str] = None) -> Dict[str, Any]:
-    """Export notebook to Python script (.py file).
-    
-    Args:
-        notebook_path: Path to the .ipynb file
-        output_path: Output path for .py file (default: same name with .py extension)
-        
-    Returns:
-        Dict containing export result
-    """
-    return _export_notebook_to_python(notebook_path, output_path)
-
-
-@mcp.tool()
-def export_to_markdown(notebook_path: str, output_path: Optional[str] = None) -> Dict[str, Any]:
-    """Export notebook to Markdown (.md file).
-    
-    Args:
-        notebook_path: Path to the .ipynb file
-        output_path: Output path for .md file (default: same name with .md extension)
-        
-    Returns:
-        Dict containing export result
-    """
-    return _export_notebook_to_markdown(notebook_path, output_path)
-
-
-@mcp.tool()
-def export_to_html(notebook_path: str, output_path: Optional[str] = None) -> Dict[str, Any]:
-    """Export notebook to HTML using nbconvert (if available).
-    
-    Args:
-        notebook_path: Path to the .ipynb file
-        output_path: Output path for .html file (default: same name with .html extension)
-        
-    Returns:
-        Dict containing export result
-    """
-    return _export_notebook_to_html(notebook_path, output_path)
-
-
-@mcp.tool()
-def export_to_pdf(notebook_path: str, output_path: Optional[str] = None) -> Dict[str, Any]:
-    """Export notebook to PDF using nbconvert (if available).
-    
-    Args:
-        notebook_path: Path to the .ipynb file
-        output_path: Output path for .pdf file (default: same name with .pdf extension)
-        
-    Returns:
-        Dict containing export result
-    """
-    return _export_notebook_to_pdf(notebook_path, output_path)
-
-
-@mcp.tool()
-def export_to_slides(notebook_path: str, output_path: Optional[str] = None) -> Dict[str, Any]:
-    """Export notebook to HTML slides using nbconvert (if available).
-    
-    Args:
-        notebook_path: Path to the .ipynb file
-        output_path: Output path for slides file (default: same name with _slides.html extension)
-        
-    Returns:
-        Dict containing export result
-    """
-    return _export_notebook_to_slides(notebook_path, output_path)
-
-
-@mcp.tool()
-def export_code_only(notebook_path: str, output_path: Optional[str] = None) -> Dict[str, Any]:
-    """Export only the code cells from a notebook to a Python file.
-    
-    Args:
-        notebook_path: Path to the .ipynb file
-        output_path: Output path for .py file (default: same name with _code_only.py extension)
-        
-    Returns:
-        Dict containing export result
-    """
-    return _export_notebook_code_only(notebook_path, output_path)
-
-
-@mcp.tool()
-def get_available_export_formats() -> Dict[str, Any]:
-    """Get available export formats.
-    
-    Returns:
-        Dict containing available export formats
-    """
-    return _get_export_formats()
-
-
-# Enhanced Workflow Tools
-
-@mcp.tool()
-async def create_and_execute_cell(
-    notebook_path: str,
-    cell_type: str,
-    content: str,
-    index: Optional[int] = None,
-    kernel_spec: str = "python3",
-    timeout: int = 30,
-    auto_refresh: bool = True,
-    auto_backup: bool = True
-) -> Dict[str, Any]:
-    """Create a new cell and execute it if it's a code cell (enhanced workflow).
-    
-    This combines cell creation, execution, and file refresh for better UX.
-    
-    Args:
-        notebook_path: Path to the .ipynb file
-        cell_type: Type of cell ('code', 'markdown', 'raw')
-        content: Content of the new cell
-        index: Position to insert cell (default: append to end)
-        kernel_spec: Kernel specification for execution
-        timeout: Execution timeout in seconds
-        auto_refresh: Whether to trigger file refresh for VS Code sync
-        auto_backup: Whether to create backup before operation
-        
-    Returns:
-        Dict containing combined operation results including execution output
-    """
-    return await _create_and_execute_cell(
-        notebook_path, cell_type, content, index, kernel_spec, timeout, auto_refresh, auto_backup
-    )
-
-
-@mcp.tool()
-async def execute_with_refresh(
-    notebook_path: str,
-    index: int,
-    kernel_spec: str = "python3",
-    timeout: int = 30,
-    auto_refresh: bool = True,
-    retry_on_failure: bool = True
-) -> Dict[str, Any]:
-    """Execute a cell with enhanced refresh and retry logic.
-    
-    This adds automatic file refresh and retry capabilities to cell execution.
-    
-    Args:
-        notebook_path: Path to the .ipynb file
-        index: Index of the cell to execute
-        kernel_spec: Kernel specification
-        timeout: Execution timeout in seconds
-        auto_refresh: Whether to trigger file refresh for VS Code sync
-        retry_on_failure: Whether to retry execution on failure
-        
-    Returns:
-        Dict containing execution results and refresh status
-    """
-    return await _execute_with_refresh(
-        notebook_path, index, kernel_spec, timeout, auto_refresh, retry_on_failure
-    )
-
-
-@mcp.tool()
-async def batch_create_and_execute(
-    notebook_path: str,
-    cells: list,
-    start_index: Optional[int] = None,
-    execute_code_cells: bool = True,
-    kernel_spec: str = "python3",
-    timeout_per_cell: int = 30,
-    stop_on_error: bool = False,
-    auto_backup: bool = True
-) -> Dict[str, Any]:
-    """Create and optionally execute multiple cells in batch (enhanced workflow).
-    
-    Efficiently handles multiple cell operations with progress tracking.
-    
-    Args:
-        notebook_path: Path to the .ipynb file
-        cells: List of cell specifications [{"type": "code", "content": "..."}, ...]
-        start_index: Starting index for cell insertion
-        execute_code_cells: Whether to execute code cells after creation
-        kernel_spec: Kernel specification
-        timeout_per_cell: Timeout per cell execution
-        stop_on_error: Whether to stop on first error
-        auto_backup: Whether to create backup before operations
-        
-    Returns:
-        Dict containing batch operation results with detailed progress info
-    """
-    return await _batch_create_and_execute(
-        notebook_path, cells, start_index, execute_code_cells, 
-        kernel_spec, timeout_per_cell, stop_on_error, auto_backup
-    )
-
-
-# Synchronous Auto-Save Tools
-
-@mcp.tool()
-def synchronous_auto_save_file(notebook_path: str, timeout: float = 5.0) -> Dict[str, Any]:
-    """Perform synchronous auto-save that blocks until completion.
-    
-    This function:
-    1. Records initial file modification time
-    2. Forces file system sync
-    3. Sends save command to VS Code
-    4. Waits for file modification time to change
-    5. Returns only after save is confirmed complete
-    
-    Args:
-        notebook_path: Path to the notebook file
-        timeout: Maximum time to wait for save completion
-        
-    Returns:
-        Dict containing save operation results
-    """
-    return _synchronous_auto_save(notebook_path, timeout)
-
-
-@mcp.tool()
-def enhanced_save_notebook_file(notebook_path: str, auto_save: bool = True) -> Dict[str, Any]:
-    """Enhanced notebook save with optional synchronous auto-save.
-    
-    This function reads the current notebook, validates it, and saves it back
-    with optional synchronous auto-save for immediate VS Code sync.
-    
-    Args:
-        notebook_path: Path to the notebook file
-        auto_save: Whether to perform synchronous auto-save after writing
-        
-    Returns:
-        Dict containing save operation results
-    """
+    """List available kernel specifications."""
     try:
-        # Load the current notebook
-        from notebook_utils import safe_load_notebook
-        notebook = safe_load_notebook(notebook_path)
-        
-        # Save with enhanced functionality
-        return _enhanced_safe_save_notebook(notebook, notebook_path, auto_save)
-        
-    except Exception as e:
+        kernels = find_kernel_specs()
         return {
-            "success": False,
-            "notebook_path": notebook_path,
-            "file_written": False,
-            "auto_save_result": None,
-            "operations": [],
-            "errors": [f"Enhanced save error: {str(e)}"]
+            "success": True,
+            "available_kernels": list(kernels.keys()),
+            "current_kernel": _current_kernel_spec
         }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
 
-# Server entry point
 def main():
     """Main entry point for the MCP server."""
     mcp.run()
+
 
 if __name__ == "__main__":
     main()
