@@ -1,9 +1,9 @@
 {
   "mcpServers": {
     "local-notebook": {
-      "command": "python",
-      "args": ["/Users/vivmagarwal/Desktop/experiments/vincent/local-notebook-mcp-server/local_notebook_mcp_server.py"],
-      "cwd": "/Users/vivmagarwal/Desktop/experiments/vincent/local-notebook-mcp-server"
+      "command": "local-notebook-mcp-server",
+      "args": [],
+      "cwd": "/Users/vivmagarwal/Desktop/experiments/vincent"
     }
   }
 }

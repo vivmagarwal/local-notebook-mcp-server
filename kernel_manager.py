@@ -73,25 +73,36 @@ async def execute_cell_code(notebook_path: str, index: int, kernel_spec: str = "
         outputs = []
         execution_count = None
         
-        # Collect outputs with timeout
+        # Collect outputs with timeout - simplified approach
         try:
-            end_time = asyncio.get_event_loop().time() + timeout
-            while asyncio.get_event_loop().time() < end_time:
+            import time
+            start_time = time.time()
+            
+            while time.time() - start_time < timeout:
                 try:
-                    # Use a shorter timeout for individual message checks
-                    msg = kc.get_iopub_msg(timeout=1)
+                    # Check for messages with short timeout
+                    msg = kc.get_iopub_msg(timeout=0.5)
                     msg_type = msg['msg_type']
                     content = msg['content']
                     
                     if msg_type == 'execute_input':
                         execution_count = content['execution_count']
-                    elif msg_type in ['stream', 'display_data', 'execute_result']:
+                    elif msg_type == 'stream':
+                        output = {
+                            'output_type': 'stream',
+                            'name': content.get('name', 'stdout'),
+                            'text': content.get('text', '')
+                        }
+                        outputs.append(output)
+                        cell.outputs.append(output)
+                    elif msg_type in ['display_data', 'execute_result']:
                         output = {
                             'output_type': msg_type,
                             'data': content.get('data', {}),
-                            'text': content.get('text', ''),
-                            'name': content.get('name', '')
+                            'metadata': content.get('metadata', {})
                         }
+                        if msg_type == 'execute_result':
+                            output['execution_count'] = content.get('execution_count')
                         outputs.append(output)
                         cell.outputs.append(output)
                     elif msg_type == 'error':
@@ -104,29 +115,31 @@ async def execute_cell_code(notebook_path: str, index: int, kernel_spec: str = "
                         outputs.append(error_output)
                         cell.outputs.append(error_output)
                     elif msg_type == 'status' and content['execution_state'] == 'idle':
+                        # Execution completed
                         break
                         
                 except Exception:
-                    # Short sleep to avoid busy waiting
+                    # No more messages, continue waiting or timeout
                     await asyncio.sleep(0.1)
                     continue
+            
+            # Update execution count if we got one
+            if execution_count is not None:
+                cell.execution_count = execution_count
+            
+            # Save notebook with outputs
+            safe_save_notebook(notebook, notebook_path)
+            
+            return {
+                "success": True,
+                "notebook_path": notebook_path,
+                "index": index,
+                "execution_count": execution_count,
+                "outputs": [extract_output_text(output) for output in outputs]
+            }
                     
         except Exception as e:
-            return {"success": False, "error": f"Execution timeout or error: {str(e)}"}
-        
-        # Update execution count
-        cell.execution_count = execution_count
-        
-        # Save notebook with outputs
-        safe_save_notebook(notebook, notebook_path)
-        
-        return {
-            "success": True,
-            "notebook_path": notebook_path,
-            "index": index,
-            "execution_count": execution_count,
-            "outputs": [extract_output_text(output) for output in outputs]
-        }
+            return {"success": False, "error": f"Execution error: {str(e)}"}
         
     except Exception as e:
         return {"success": False, "error": str(e)}

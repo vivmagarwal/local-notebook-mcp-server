@@ -24,48 +24,15 @@ except ImportError:
     exit(1)
 
 # Import our modules with aliases to avoid name conflicts
+import os
+import sys
+
+# Add current directory to Python path for imports
+current_dir = os.path.dirname(os.path.abspath(__file__))
+if current_dir not in sys.path:
+    sys.path.insert(0, current_dir)
+
 try:
-    # Try relative imports first (when running as a package)
-    from .file_operations import (
-        read_notebook_file as _read_notebook_file,
-        list_notebook_files as _list_notebook_files,
-        backup_notebook_file as _backup_notebook_file,
-        create_new_notebook as _create_new_notebook,
-        get_notebook_metadata as _get_notebook_metadata,
-        analyze_notebook_dependencies as _analyze_notebook_dependencies,
-        search_notebook_cells as _search_notebook_cells
-    )
-
-    from .cell_operations import (
-        add_notebook_cell as _add_notebook_cell,
-        modify_notebook_cell as _modify_notebook_cell,
-        delete_notebook_cell as _delete_notebook_cell,
-        get_notebook_cell as _get_notebook_cell,
-        move_notebook_cell as _move_notebook_cell,
-        duplicate_notebook_cell as _duplicate_notebook_cell,
-        clear_cell_outputs as _clear_cell_outputs,
-        change_cell_type as _change_cell_type
-    )
-
-    from .kernel_manager import (
-        execute_cell_code as _execute_cell_code,
-        execute_all_cells as _execute_all_cells,
-        restart_kernel_manager as _restart_kernel_manager,
-        interrupt_kernel_manager as _interrupt_kernel_manager,
-        list_available_kernels as _list_available_kernels
-    )
-
-    from .export_operations import (
-        export_notebook_to_python as _export_notebook_to_python,
-        export_notebook_to_markdown as _export_notebook_to_markdown,
-        export_notebook_to_html as _export_notebook_to_html,
-        export_notebook_to_pdf as _export_notebook_to_pdf,
-        export_notebook_to_slides as _export_notebook_to_slides,
-        export_notebook_code_only as _export_notebook_code_only,
-        get_export_formats as _get_export_formats
-    )
-except ImportError:
-    # Fall back to absolute imports (when running directly)
     from file_operations import (
         read_notebook_file as _read_notebook_file,
         list_notebook_files as _list_notebook_files,
@@ -104,6 +71,10 @@ except ImportError:
         export_notebook_code_only as _export_notebook_code_only,
         get_export_formats as _get_export_formats
     )
+except ImportError as e:
+    print(f"Error importing modules: {e}")
+    print("Please ensure all required modules are in the same directory as the main server file.")
+    sys.exit(1)
 
 # Initialize MCP server
 mcp = FastMCP("local-notebook")
@@ -486,5 +457,9 @@ def get_available_export_formats() -> Dict[str, Any]:
 
 
 # Server entry point
-if __name__ == "__main__":
+def main():
+    """Main entry point for the MCP server."""
     mcp.run()
+
+if __name__ == "__main__":
+    main()
