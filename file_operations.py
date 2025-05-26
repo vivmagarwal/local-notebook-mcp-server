@@ -16,9 +16,9 @@ except ImportError:
     exit(1)
 
 try:
-    from .notebook_utils import safe_load_notebook, safe_save_notebook, get_backup_path, extract_output_text
+    from .notebook_utils import safe_load_notebook, safe_save_notebook, get_backup_path, extract_output_text, resolve_notebook_path
 except ImportError:
-    from notebook_utils import safe_load_notebook, safe_save_notebook, get_backup_path, extract_output_text
+    from notebook_utils import safe_load_notebook, safe_save_notebook, get_backup_path, extract_output_text, resolve_notebook_path
 
 
 def read_notebook_file(notebook_path: str) -> Dict[str, Any]:
@@ -57,9 +57,11 @@ def read_notebook_file(notebook_path: str) -> Dict[str, Any]:
 def list_notebook_files(directory: str = ".") -> Dict[str, Any]:
     """List all Jupyter notebook files in a directory."""
     try:
-        path_obj = Path(directory)
+        # Resolve the directory path
+        resolved_dir = resolve_notebook_path(directory)
+        path_obj = Path(resolved_dir)
         if not path_obj.exists():
-            return {"success": False, "error": f"Directory {directory} does not exist"}
+            return {"success": False, "error": f"Directory {resolved_dir} does not exist"}
         
         notebooks = []
         for notebook_path in path_obj.glob("*.ipynb"):

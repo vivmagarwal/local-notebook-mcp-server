@@ -12,9 +12,9 @@ except ImportError:
     exit(1)
 
 try:
-    from .notebook_utils import safe_load_notebook, safe_save_notebook, extract_output_text
+    from .notebook_utils import safe_load_notebook, safe_save_notebook, enhanced_safe_save_notebook, extract_output_text
 except ImportError:
-    from notebook_utils import safe_load_notebook, safe_save_notebook, extract_output_text
+    from notebook_utils import safe_load_notebook, safe_save_notebook, enhanced_safe_save_notebook, extract_output_text
 
 
 def add_notebook_cell(notebook_path: str, cell_type: str, content: str, index: Optional[int] = None) -> Dict[str, Any]:
@@ -37,15 +37,22 @@ def add_notebook_cell(notebook_path: str, cell_type: str, content: str, index: O
         else:
             notebook.cells.insert(index, new_cell)
         
-        safe_save_notebook(notebook, notebook_path)
+        # Use enhanced save with synchronous auto-save
+        save_result = enhanced_safe_save_notebook(notebook, notebook_path, auto_save=True)
         
-        return {
-            "success": True,
+        result = {
+            "success": save_result.get("success", False),
             "notebook_path": notebook_path,
             "cell_type": cell_type,
             "index": index,
-            "total_cells": len(notebook.cells)
+            "total_cells": len(notebook.cells),
+            "save_result": save_result
         }
+        
+        if not result["success"]:
+            result["error"] = f"Save failed: {save_result.get('errors', ['Unknown error'])}"
+        
+        return result
     except Exception as e:
         return {"success": False, "error": str(e)}
 

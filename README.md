@@ -313,6 +313,28 @@ The server automatically manages Jupyter kernels:
    - Ensure write permissions in the notebook directory
    - Check file ownership and permissions
 
+6. **"Read-only file system" error**
+   - This can occur when using relative paths with some MCP clients
+   - **Solution**: Use absolute paths for notebook operations
+   - Example: Use `/full/path/to/notebook.ipynb` instead of `notebook.ipynb`
+   - The server works best when notebook paths are fully qualified
+
+### Path Requirements
+
+**Important**: Some MCP clients may have issues with relative paths. For best compatibility:
+
+- ✅ **Recommended**: Use absolute paths like `/Users/username/notebooks/hello.ipynb`
+- ❌ **May fail**: Relative paths like `hello.ipynb` or `./notebooks/hello.ipynb`
+
+Example of correct usage:
+```python
+# Good - absolute path
+create_notebook("/Users/username/notebooks/new_notebook.ipynb", "My Notebook")
+
+# May fail - relative path
+create_notebook("new_notebook.ipynb", "My Notebook")  # Can cause "Read-only file system" error
+```
+
 ### Debug Mode
 
 Run the server with debug output:

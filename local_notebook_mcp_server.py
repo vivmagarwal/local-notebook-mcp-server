@@ -71,6 +71,17 @@ try:
         export_notebook_code_only as _export_notebook_code_only,
         get_export_formats as _get_export_formats
     )
+
+    from workflow_operations import (
+        create_and_execute_cell as _create_and_execute_cell,
+        execute_with_refresh as _execute_with_refresh,
+        batch_create_and_execute as _batch_create_and_execute
+    )
+
+    from notebook_utils import (
+        enhanced_safe_save_notebook as _enhanced_safe_save_notebook,
+        synchronous_auto_save as _synchronous_auto_save
+    )
 except ImportError as e:
     print(f"Error importing modules: {e}")
     print("Please ensure all required modules are in the same directory as the main server file.")
@@ -454,6 +465,160 @@ def get_available_export_formats() -> Dict[str, Any]:
         Dict containing available export formats
     """
     return _get_export_formats()
+
+
+# Enhanced Workflow Tools
+
+@mcp.tool()
+async def create_and_execute_cell(
+    notebook_path: str,
+    cell_type: str,
+    content: str,
+    index: Optional[int] = None,
+    kernel_spec: str = "python3",
+    timeout: int = 30,
+    auto_refresh: bool = True,
+    auto_backup: bool = True
+) -> Dict[str, Any]:
+    """Create a new cell and execute it if it's a code cell (enhanced workflow).
+    
+    This combines cell creation, execution, and file refresh for better UX.
+    
+    Args:
+        notebook_path: Path to the .ipynb file
+        cell_type: Type of cell ('code', 'markdown', 'raw')
+        content: Content of the new cell
+        index: Position to insert cell (default: append to end)
+        kernel_spec: Kernel specification for execution
+        timeout: Execution timeout in seconds
+        auto_refresh: Whether to trigger file refresh for VS Code sync
+        auto_backup: Whether to create backup before operation
+        
+    Returns:
+        Dict containing combined operation results including execution output
+    """
+    return await _create_and_execute_cell(
+        notebook_path, cell_type, content, index, kernel_spec, timeout, auto_refresh, auto_backup
+    )
+
+
+@mcp.tool()
+async def execute_with_refresh(
+    notebook_path: str,
+    index: int,
+    kernel_spec: str = "python3",
+    timeout: int = 30,
+    auto_refresh: bool = True,
+    retry_on_failure: bool = True
+) -> Dict[str, Any]:
+    """Execute a cell with enhanced refresh and retry logic.
+    
+    This adds automatic file refresh and retry capabilities to cell execution.
+    
+    Args:
+        notebook_path: Path to the .ipynb file
+        index: Index of the cell to execute
+        kernel_spec: Kernel specification
+        timeout: Execution timeout in seconds
+        auto_refresh: Whether to trigger file refresh for VS Code sync
+        retry_on_failure: Whether to retry execution on failure
+        
+    Returns:
+        Dict containing execution results and refresh status
+    """
+    return await _execute_with_refresh(
+        notebook_path, index, kernel_spec, timeout, auto_refresh, retry_on_failure
+    )
+
+
+@mcp.tool()
+async def batch_create_and_execute(
+    notebook_path: str,
+    cells: list,
+    start_index: Optional[int] = None,
+    execute_code_cells: bool = True,
+    kernel_spec: str = "python3",
+    timeout_per_cell: int = 30,
+    stop_on_error: bool = False,
+    auto_backup: bool = True
+) -> Dict[str, Any]:
+    """Create and optionally execute multiple cells in batch (enhanced workflow).
+    
+    Efficiently handles multiple cell operations with progress tracking.
+    
+    Args:
+        notebook_path: Path to the .ipynb file
+        cells: List of cell specifications [{"type": "code", "content": "..."}, ...]
+        start_index: Starting index for cell insertion
+        execute_code_cells: Whether to execute code cells after creation
+        kernel_spec: Kernel specification
+        timeout_per_cell: Timeout per cell execution
+        stop_on_error: Whether to stop on first error
+        auto_backup: Whether to create backup before operations
+        
+    Returns:
+        Dict containing batch operation results with detailed progress info
+    """
+    return await _batch_create_and_execute(
+        notebook_path, cells, start_index, execute_code_cells, 
+        kernel_spec, timeout_per_cell, stop_on_error, auto_backup
+    )
+
+
+# Synchronous Auto-Save Tools
+
+@mcp.tool()
+def synchronous_auto_save_file(notebook_path: str, timeout: float = 5.0) -> Dict[str, Any]:
+    """Perform synchronous auto-save that blocks until completion.
+    
+    This function:
+    1. Records initial file modification time
+    2. Forces file system sync
+    3. Sends save command to VS Code
+    4. Waits for file modification time to change
+    5. Returns only after save is confirmed complete
+    
+    Args:
+        notebook_path: Path to the notebook file
+        timeout: Maximum time to wait for save completion
+        
+    Returns:
+        Dict containing save operation results
+    """
+    return _synchronous_auto_save(notebook_path, timeout)
+
+
+@mcp.tool()
+def enhanced_save_notebook_file(notebook_path: str, auto_save: bool = True) -> Dict[str, Any]:
+    """Enhanced notebook save with optional synchronous auto-save.
+    
+    This function reads the current notebook, validates it, and saves it back
+    with optional synchronous auto-save for immediate VS Code sync.
+    
+    Args:
+        notebook_path: Path to the notebook file
+        auto_save: Whether to perform synchronous auto-save after writing
+        
+    Returns:
+        Dict containing save operation results
+    """
+    try:
+        # Load the current notebook
+        from notebook_utils import safe_load_notebook
+        notebook = safe_load_notebook(notebook_path)
+        
+        # Save with enhanced functionality
+        return _enhanced_safe_save_notebook(notebook, notebook_path, auto_save)
+        
+    except Exception as e:
+        return {
+            "success": False,
+            "notebook_path": notebook_path,
+            "file_written": False,
+            "auto_save_result": None,
+            "operations": [],
+            "errors": [f"Enhanced save error: {str(e)}"]
+        }
 
 
 # Server entry point
