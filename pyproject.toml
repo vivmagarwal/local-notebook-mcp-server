@@ -1,0 +1,82 @@
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "local-notebook-mcp-server"
+version = "1.0.0"
+description = "A comprehensive MCP server for local Jupyter notebook management"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "Vivek M. Agarwal", email = "vivmagarwal@gmail.com"}
+]
+maintainers = [
+    {name = "Vivek M. Agarwal", email = "vivmagarwal@gmail.com"}
+]
+keywords = [
+    "mcp",
+    "model-context-protocol", 
+    "jupyter",
+    "notebook",
+    "ai",
+    "llm",
+    "claude"
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Scientific/Engineering",
+]
+requires-python = ">=3.8"
+dependencies = [
+    "asyncio",
+    "anyio",
+    "mcp>=1.0.0",
+    "nbformat>=5.0.0",
+    "nbconvert>=6.0.0",
+    "jupyter-client>=7.0.0",
+    "ipykernel>=6.0.0",
+    "pathlib",
+    "tempfile",
+    "shutil",
+    "datetime",
+    "re",
+    "ast",
+    "json",
+    "base64",
+    "argparse"
+]
+
+[project.urls]
+Homepage = "https://github.com/vivmagarwal/local-notebook-mcp-server"
+Repository = "https://github.com/vivmagarwal/local-notebook-mcp-server"
+Issues = "https://github.com/vivmagarwal/local-notebook-mcp-server/issues"
+Documentation = "https://github.com/vivmagarwal/local-notebook-mcp-server#readme"
+
+[project.scripts]
+local-notebook-mcp-server = "local_notebook_mcp_server:main"
+
+[tool.setuptools]
+py-modules = ["local_notebook_mcp_server"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["local_notebook_mcp_server*"]
+
+[tool.black]
+line-length = 88
+target-version = ['py38']
+
+[tool.isort]
+profile = "black"
+multi_line_output = 3
