@@ -77,17 +77,77 @@ Add to your Claude Desktop MCP settings (`~/Library/Application Support/Claude/c
 }
 ```
 
-### For Cline/VSCode Extension
+### For Cline/VS Code Extension
+
+#### Step 1: Install the Server
+First, install the server in your Python environment:
+
+```bash
+pip install local-notebook-mcp-server
+```
+
+Or install from source:
+```bash
+git clone https://github.com/your-username/local-notebook-mcp-server.git
+cd local-notebook-mcp-server
+pip install -e .
+```
+
+#### Step 2: Find the Server Location
+Find where the server was installed:
+
+```bash
+which local-notebook-mcp-server
+```
+
+This will return the full path, e.g., `/Users/username/Library/Caches/pypoetry/virtualenvs/your-env/bin/local-notebook-mcp-server`
+
+#### Step 3: Configure Cline
+Add to your Cline MCP settings file (`~/.config/cline/settings.json` or access through VS Code settings):
 
 ```json
 {
-  "local-notebook": {
-    "command": "python",
-    "args": ["-m", "local_notebook_mcp_server"],
-    "cwd": "/path/to/your/notebooks"
+  "mcpServers": {
+    "local-notebook-mcp-server": {
+      "autoApprove": [
+        "read_notebook",
+        "list_notebooks",
+        "create_notebook",
+        "backup_notebook",
+        "add_cell",
+        "modify_cell",
+        "delete_cell",
+        "get_cell",
+        "move_cell",
+        "duplicate_cell",
+        "search_cells",
+        "get_notebook_metadata",
+        "analyze_dependencies",
+        "export_to_python",
+        "export_to_markdown",
+        "export_to_html",
+        "export_code_only",
+        "list_kernels"
+      ],
+      "disabled": false,
+      "timeout": 300,
+      "command": "/full/path/to/local-notebook-mcp-server",
+      "args": [],
+      "cwd": "/path/to/your/notebooks/directory",
+      "transportType": "stdio"
+    }
   }
 }
 ```
+
+**Important Notes:**
+- Replace `/full/path/to/local-notebook-mcp-server` with the actual path from Step 2
+- Replace `/path/to/your/notebooks/directory` with your actual notebooks directory
+- The `autoApprove` list enables automatic approval of common operations for smoother workflow
+- Set `disabled: false` to enable the server
+
+#### Step 4: Restart VS Code
+Restart VS Code or reload the Cline extension to pick up the new configuration.
 
 ### For Other MCP Clients
 
