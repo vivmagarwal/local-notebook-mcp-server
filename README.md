@@ -279,7 +279,6 @@ This project is licensed under the MIT License.
 
 - [Model Context Protocol](https://modelcontextprotocol.io)
 - [Jupyter Notebook Format](https://nbformat.readthedocs.io/)
-- [Analytics Vidhya Blog Post](https://www.analyticsvidhya.com/blog/2025/05/jupyter-mcp-server/)
 - [Datalayer Jupyter MCP Server](https://github.com/datalayer/jupyter-mcp-server)
 
 ---
