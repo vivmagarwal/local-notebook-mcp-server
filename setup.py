@@ -1,17 +1,14 @@
-from setuptools import setup, find_packages
+from setuptools import setup
 
 with open("README.md", "r", encoding="utf-8") as fh:
     long_description = fh.read()
-
-with open("requirements.txt", "r", encoding="utf-8") as fh:
-    requirements = [line.strip() for line in fh if line.strip() and not line.startswith("#")]
 
 setup(
     name="local-notebook-mcp-server",
     version="1.0.0",
     author="Vivek M. Agarwal",
     author_email="vivmagarwal@gmail.com",
-    description="A comprehensive MCP server for local Jupyter notebook management",
+    description="A simple MCP server for local Jupyter notebook management",
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/vivmagarwal/local-notebook-mcp-server",
@@ -27,20 +24,17 @@ setup(
         "Programming Language :: Python :: 3.10",
         "Programming Language :: Python :: 3.11",
         "Programming Language :: Python :: 3.12",
-        "Topic :: Software Development :: Libraries :: Python Modules",
-        "Topic :: Scientific/Engineering",
     ],
     python_requires=">=3.8",
-    install_requires=requirements,
+    install_requires=[
+        "mcp>=1.0.0",
+        "nbformat>=5.7.0",
+        "jupyter-client>=7.0.0",
+        "ipykernel>=6.0.0"
+    ],
     entry_points={
         "console_scripts": [
             "local-notebook-mcp-server=local_notebook_mcp_server:main",
         ],
-    },
-    keywords="mcp, model-context-protocol, jupyter, notebook, ai, llm, claude",
-    project_urls={
-        "Bug Reports": "https://github.com/vivmagarwal/local-notebook-mcp-server/issues",
-        "Source": "https://github.com/vivmagarwal/local-notebook-mcp-server",
-        "Documentation": "https://github.com/vivmagarwal/local-notebook-mcp-server#readme",
     },
 )
